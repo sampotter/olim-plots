@@ -8,7 +8,7 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--min_3d_power', type=int, default=3)
-parser.add_argument('--max_3d_power', type=int, default=10)
+parser.add_argument('--max_3d_power', type=int, default=8)
 parser.add_argument('--build_type', type=str, default='Release')
 parser.add_argument('--no_factoring', action='store_true')
 args = parser.parse_args()
@@ -21,13 +21,11 @@ sys.path.insert(0, '../build/%s' % args.build_type)
 sys.path.insert(0, '../misc/py')
 
 import common3d
-import datetime
 import itertools
 import matplotlib.pyplot as plt
 import numpy as np
 import pyeikonal as eik
 import speedfuncs3d
-import time
 
 from cycler import cycler
 from matplotlib import rc
@@ -63,10 +61,7 @@ Olims = [eik.Olim6Mid0, eik.Olim6Mid1, eik.Olim6Rect,
 
 Slows_by_Olims = list(itertools.product(Slows, Olims))
 
-T = {(slow, Olim): np.empty(N.shape) for slow, Olim in Slows_by_Olims}
 E = {(slow, Olim): np.empty(N.shape) for slow, Olim in Slows_by_Olims}
-
-ntrials = 2
 
 current_slow, current_Olim, current_n = None, None, None
 for (slow, Olim), (ind, n) in itertools.product(Slows_by_Olims, enumerate(N)):
@@ -80,8 +75,6 @@ for (slow, Olim), (ind, n) in itertools.product(Slows_by_Olims, enumerate(N)):
         print('  - %d' % n)
         current_n = n
 
-    # get timings
-
     h = 2/(n-1)
     i0, j0, k0 = n//2, n//2, n//2
     L = np.linspace(-1, 1, n)
@@ -90,26 +83,13 @@ for (slow, Olim), (ind, n) in itertools.product(Slows_by_Olims, enumerate(N)):
     I, J, K = np.where(R < r_fac)
     u, S = speedfuncs3d.get_fields(Solns[slow], slow, x, y, z)
 
-    t = np.inf
-
-    for _ in range(1 if n > 100 else ntrials):
-
-        o = Olim(S, h)
-        if not args.no_factoring:
-            fc = eik.FacCenter3d(i0, j0, k0, slow(0, 0, 0))
-            for i, j, k in zip(I, J, K):
-                o.set_node_fac_center(i, j, k, fc)
-        o.add_boundary_node(i0, j0, k0)
-
-        t0 = time.perf_counter()
-        o.run()
-        t = min(t, time.perf_counter() - t0)
-
-        print('    + %s' % datetime.timedelta(seconds=t))
-
-    T[slow, Olim][ind] = t
-
-    # get errors
+    o = Olim(S, h)
+    if not args.no_factoring:
+        fc = eik.FacCenter3d(i0, j0, k0, slow(0, 0, 0))
+        for i, j, k in zip(I, J, K):
+            o.set_node_fac_center(i, j, k, fc)
+    o.add_boundary_node(i0, j0, k0)
+    o.run()
 
     U = np.array([[[o.get_value(i, j, k) for k in range(n)]
                    for j in range(n)]
@@ -117,31 +97,29 @@ for (slow, Olim), (ind, n) in itertools.product(Slows_by_Olims, enumerate(N)):
     E[slow, Olim][ind] = \
         norm((u - U).flatten(), np.inf)/norm(u.flatten(), np.inf)
 
-# make plots
+################################################################################
+# plotting
 
-marker = '|'
-# colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
 colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 cmap = [0, 1, 4, 3]
-# linestyles = ['-', '--', ':', '-.']
 linestyles = [':', '-.', '--', '-']
 
-# time vs error
+style = {
+    'linewidth': 1,
+    'marker': '|',
+    'markersize': 3.5
+}
 
-# make plots for the first two slowness functions (these are very
-# cramped, so split them into two figures)
-
-fig, axes = plt.subplots(2, 2, sharex=True, sharey='row', figsize=(6.5, 6))
-
+fig, axes = plt.subplots(2, 2, sharex=True, sharey='row', figsize=(6.5, 6.5))
 ax = axes.flatten()
 
 for i, slow in enumerate(Slows):
     for ind, Olim in enumerate(Olims):
         print((i, ind, Olim))
         ax[i].loglog(
-            T[slow, Olim], E[slow, Olim], marker=marker, markersize=3.5,
-            color=colors[cmap[ind % 3]], linestyle=linestyles[ind//3],
-            linewidth=1, label=common3d.get_marcher_plot_name(Olim))
+            N, E[slow, Olim], color=colors[cmap[ind % 3]],
+            linestyle=linestyles[ind//3],
+            label=common3d.get_marcher_plot_name(Olim), **style)
         ax[i].text(
             0.95, 0.9, '$\\texttt{s%d}$' % (i + 1),
             transform=ax[i].transAxes, horizontalalignment='center',
@@ -149,14 +127,11 @@ for i, slow in enumerate(Slows):
 
 axes[0, 0].set_ylabel(r'$\|u - U\|_\infty/\|u\|_\infty$')
 axes[1, 0].set_ylabel(r'$\|u - U\|_\infty/\|u\|_\infty$')
-axes[-1, 0].set_xlabel('Time (s.)')    
-axes[-1, 1].set_xlabel('Time (s.)')    
+axes[-1, 0].set_xlabel(r'$N$')
+axes[-1, 1].set_xlabel(r'$N$')
 
 handles, labels = axes[-1, -1].get_legend_handles_labels()
-    
 fig.legend(handles, labels, loc='upper center', ncol=4)
 fig.tight_layout()
-fig.subplots_adjust(0.085, 0.055, 0.995, 0.935)
+fig.savefig('make_3d_error_plots.eps')
 fig.show()
-
-fig.savefig('time_vs_error_3d.eps')
