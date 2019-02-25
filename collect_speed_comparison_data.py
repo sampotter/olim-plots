@@ -1,32 +1,16 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# parse arguments first
-
-import argparse
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--build_type', type=str, default='Release')
-    args = parser.parse_args()
-
-################################################################################
 # preliminaries
-
-if __name__ == '__main__':
-    BUILD_TYPE = args.build_type
-else:
-    BUILD_TYPE = 'Release'
-
-import sys
-sys.path.insert(0, '../build/%s' % BUILD_TYPE)
-sys.path.insert(0, '../misc/py')
 
 import itertools as it
 import matplotlib.pyplot as plt
 import numpy as np
-import pyolim as olim
+import pyolim
 import time
+
+from pyolim import Neighborhood
+from pyolim import Quadrature
 
 from matplotlib import rc
 
@@ -65,18 +49,18 @@ for i, n in enumerate(N):
 
     for _ in range(ntrials):
 
-        o = olim.BasicMarcher3D(S, h)
-        o.add_boundary_node(i0, i0, i0)
+        olim = pyolim.Olim(Neighborhood.FMM3, Quadrature.RHR, S, h)
+        olim.add_src((i0, i0, i0))
 
         tic()
-        o.run()
+        olim.run()
         tb = min(tb, toc())
 
-        o = olim.Olim6Rect(S, h)
-        o.add_boundary_node(i0, i0, i0)
+        olim = pyolim.Olim(Neighborhood.OLIM6, Quadrature.RHR, S, h)
+        olim.add_src((i0, i0, i0))
 
         tic()
-        o.run()
+        olim.run()
         to = min(to, toc())
 
     Tb.append(tb)
