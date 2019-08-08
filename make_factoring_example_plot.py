@@ -10,21 +10,18 @@ parser.add_argument('--min_2d_power', type=int, default=3)
 parser.add_argument('--max_2d_power', type=int, default=15)
 parser.add_argument('--min_3d_power', type=int, default=3)
 parser.add_argument('--max_3d_power', type=int, default=10)
-parser.add_argument('--build_type', type=str, default='Release')
 args = parser.parse_args()
 
 ################################################################################
 # preliminaries
 
-import sys;
-sys.path.insert(0, '../build/%s' % args.build_type)
-sys.path.insert(0, '../misc/py')
-
 import matplotlib.pyplot as plt
 import numpy as np
-import pyolim as olim
+import pyolim
 import slow2
 import slow3
+
+from pyolim import Neighborhood, Quadrature
 
 from matplotlib.colors import LogNorm
 from matplotlib import rc
@@ -41,8 +38,9 @@ norm = np.linalg.norm
 plt.ion()
 plt.style.use('bmh')
 
-Olim = olim.Olim8Rect
-Olim3d = olim.Olim26Rect
+nb2 = Neighborhood.OLIM8
+nb3 = Neighborhood.OLIM26
+quad = Quadrature.RHR
 
 Npow = np.arange(args.min_2d_power, args.max_2d_power + 1)
 N = 2**Npow + 1
@@ -69,11 +67,10 @@ for ind, n in enumerate(N):
 
     # unfactored
     
-    o = Olim(s, h)
-    o.add_boundary_node(i0, j0)
-    o.run()
-    U = np.array([[o.get_value(i, j) for i in range(n)] for j in range(n)])
-    EI[ind] = norm(u - U, np.inf)/norm(u, np.inf)
+    olim = pyolim.Olim(nb2, quad, s, h)
+    olim.add_src((i0, j0))
+    olim.run()
+    EI[ind] = norm(u - olim.U, np.inf)/norm(u, np.inf)
 
     # factored using constant radius disk
 
@@ -83,14 +80,13 @@ for ind, n in enumerate(N):
         R = np.sqrt(x**2 + y**2)
         I, J = np.where(R < r_fac)
 
-        ofac = Olim(s, h)
-        fc = olim.FacCenter(i0, j0, 1)
+        olim_fac = pyolim.Olim(nb2, quad, s, h)
+        fac_src = pyolim.FacSrc((i0, j0), 1)
         for i, j in zip(I, J):
-            ofac.set_node_fac_center(i, j, fc)
-        ofac.add_boundary_node(i0, j0)
-        ofac.run()
-        Ufac = np.array([[ofac.get_value(i, j) for j in range(n)] for i in range(n)])
-        EIfac[ind, rfac_ind] = norm(u - Ufac, np.inf)/norm(u, np.inf)
+            olim_fac.set_fac_src((i, j), fac_src)
+        olim_fac.add_src((i0, j0))
+        olim_fac.run()
+        EIfac[ind, rfac_ind] = norm(u - olim_fac.U, np.inf)/norm(u, np.inf)
 
 print('- solving 3d problems')
 for ind, n in enumerate(N_3d):
@@ -105,13 +101,10 @@ for ind, n in enumerate(N_3d):
 
     # unfactored
     
-    o = Olim3d(s, h)
-    o.add_boundary_node(i0, j0, k0)
-    o.run()
-    U = np.array([[[o.get_value(i, j, k) for i in range(n)]
-                   for j in range(n)]
-                  for k in range(n)])
-    EI_3d[ind] = norm((u - U).flatten(), np.inf)/norm(u.flatten(), np.inf)
+    olim = pyolim.Olim(nb3, quad, s, h)
+    olim.add_src((i0, j0, k0))
+    olim.run()
+    EI_3d[ind] = norm((u - olim.U).flatten(), np.inf)/norm(u.flatten(), np.inf)
 
     # factored using constant radius disk
     
@@ -121,17 +114,16 @@ for ind, n in enumerate(N_3d):
         R = np.sqrt(x**2 + y**2 + z**2)
         I, J, K = np.where(R < r_fac)
 
-        ofac = Olim3d(s, h)
-        fc = olim.FacCenter3d(i0, j0, k0, 1)
+        print(I.shape)
+
+        olim_fac = pyolim.Olim(nb3, quad, s, h)
+        fac_src = pyolim.FacSrc((i0, j0, k0), 1)
         for i, j, k in zip(I, J, K):
-            ofac.set_node_fac_center(i, j, k, fc)
-        ofac.add_boundary_node(i0, j0, k0)
-        ofac.run()
-        Ufac = np.array([[[ofac.get_value(i, j, k) for i in range(n)]
-                          for j in range(n)]
-                         for k in range(n)])
+            olim_fac.set_fac_src((i, j, k), fac_src)
+        olim_fac.add_src((i0, j0, k0))
+        olim_fac.run()
         EIfac_3d[ind, rfac_ind] = \
-            norm((u - Ufac).flatten(), np.inf)/norm(u.flatten(), np.inf)
+            norm((u - olim_fac.U).flatten(), np.inf)/norm(u.flatten(), np.inf)
 
 ################################################################################
 # Plotting
@@ -180,4 +172,4 @@ ax.legend()
 
 fig.tight_layout()
 
-fig.savefig('factoring-error-example.eps')
+fig.savefig('factoring_example.eps')

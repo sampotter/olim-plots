@@ -8,23 +8,21 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--min_2d_power', type=int, default=3)
 parser.add_argument('--max_2d_power', type=int, default=15)
-parser.add_argument('--build_type', type=str, default='Release')
 args = parser.parse_args()
 
 ################################################################################
 # preliminaries
 
-import sys
-sys.path.insert(0, '../build/%s' % args.build_type)
-sys.path.insert(0, '../misc/py')
-
 import common
 import itertools
 import matplotlib.pyplot as plt
 import numpy as np
-import pyolim as olim
+import pyolim
 import slow2
 import time
+
+from pyolim import Neighborhood
+from pyolim import Quadrature
 
 from matplotlib import rc
 
@@ -53,25 +51,33 @@ Solns = {
     slow2.s3: slow2.f3,
     slow2.s4: slow2.f4
 }
-Olims = [olim.Olim4Mid0, olim.Olim4Mid1, olim.Olim4Rect,
-         olim.Olim8Mid0, olim.Olim8Mid1, olim.Olim8Rect]
 
-Slows_by_Olims = list(itertools.product(Slows, Olims))
+Nbs = [Neighborhood.OLIM4, Neighborhood.OLIM8]
+Quads = [Quadrature.MP0, Quadrature.MP1, Quadrature.RHR]
 
-T = {(slow, Olim): np.empty(N.shape) for slow, Olim in Slows_by_Olims}
-E2 = {(slow, Olim): np.empty(N.shape) for slow, Olim in Slows_by_Olims}
-EI = {(slow, Olim): np.empty(N.shape) for slow, Olim in Slows_by_Olims}
+Slow_x_Nb_x_Quad = list(itertools.product(Slows, Nbs, Quads))
+
+T = {(slow, nb, quad): np.empty(N.shape) for slow, nb, quad in Slow_x_Nb_x_Quad}
+E2 = {(slow, nb, quad): np.empty(N.shape) for slow, nb, quad in Slow_x_Nb_x_Quad}
+EI = {(slow, nb, quad): np.empty(N.shape) for slow, nb, quad in Slow_x_Nb_x_Quad}
 
 ntrials = 2
 
-current_slow, current_Olim, current_n = None, None, None
-for (slow, Olim), (ind, n) in itertools.product(Slows_by_Olims, enumerate(N)):
+current_slow = None
+current_nb = None
+current_quad = None
+current_n = None
+
+for (slow, nb, quad), (ind, n) in itertools.product(Slow_x_Nb_x_Quad, enumerate(N)):
     if slow != current_slow:
         print(slow2.get_slowness_func_name(slow))
         current_slow = slow
-    if Olim != current_Olim:
-        print('* %s' % str(Olim))
-        current_Olim = Olim
+    if nb != current_nb or quad != current_quad:
+        print('* %s %s' % (str(nb), str(quad)))
+    if nb != current_nb:
+        current_nb = nb
+    if quad != current_quad:
+        current_quad = quad
     if n != current_n:
         print('  - %d' % n)
         current_n = n
@@ -90,24 +96,24 @@ for (slow, Olim), (ind, n) in itertools.product(Slows_by_Olims, enumerate(N)):
 
     for _ in range(ntrials):
 
-        o = Olim(S, h)
+        olim = pyolim.Olim(nb, quad, S, h)
         if use_local_factoring:
-            fc = olim.FacCenter(i0, j0, slow(0, 0))
+            fac_src = pyolim.FacSrc((i0, j0), slow(0, 0))
             for i, j in zip(I, J):
-                o.set_fac_src(i, j, fc)
-        o.add_boundary_node(i0, j0)
+                olim.set_fac_src((i, j), fac_src)
+        olim.add_src((i0, j0))
 
         t0 = time.perf_counter()
-        o.run()
+        olim.run()
         t = min(t, time.perf_counter() - t0)
 
-    T[slow, Olim][ind] = t
+    T[slow, nb, quad][ind] = t
 
     # get errors
 
-    U = np.array([[o.get_value(i, j) for j in range(n)] for i in range(n)])
-    E2[slow, Olim][ind] = norm(u - U, 'fro')/norm(u, 'fro')
-    EI[slow, Olim][ind] = norm(u - U, np.inf)/norm(u, np.inf)
+    diff = u - olim.U
+    E2[slow, nb, quad][ind] = norm(diff, 'fro')/norm(u, 'fro')
+    EI[slow, nb, quad][ind] = norm(diff, np.inf)/norm(u, np.inf)
 
 # make plots
  
@@ -123,17 +129,17 @@ axes[0, 0].set_title('Relative $\ell_2$ Error')
 axes[0, 1].set_title('Relative $\ell_\infty$ Error')
 
 for row, slow in enumerate(Slows):
-    for ind, Olim in enumerate(Olims):
-        name = common.get_marcher_plot_name(Olim)
+    for ind, (nb, quad) in enumerate(itertools.product(Nbs, Quads)):
+        name = common.get_marcher_plot_name(nb, quad)
         axes[row, 0].loglog(
-            T[slow, Olim], E2[slow, Olim], marker=marker, color=colors[ind//3],
+            T[slow, nb, quad], E2[slow, nb, quad], marker=marker, color=colors[ind//3],
             linestyle=linestyles[ind % 3], linewidth=1, label=name)
         axes[row, 0].text(0.95, 0.9, '$\\texttt{s%d}$' % (row + 1),
                           transform=axes[row, 0].transAxes,
                           horizontalalignment='center',
                           verticalalignment='center')
         axes[row, 1].loglog(
-            T[slow, Olim], EI[slow, Olim], marker=marker, color=colors[ind//3],
+            T[slow, nb, quad], EI[slow, nb, quad], marker=marker, color=colors[ind//3],
             linestyle=linestyles[ind % 3], linewidth=1, label=name)
         axes[row, 1].text(0.95, 0.9, '$\\texttt{s%d}$' % (row + 1),
                           transform=axes[row, 1].transAxes,
@@ -159,10 +165,10 @@ axes[0, 0].set_title('Relative $\ell_2$ Error')
 axes[0, 1].set_title('Relative $\ell_\infty$ Error')
 
 for row, slow in enumerate(Slows):
-    for ind, Olim in enumerate(Olims):
-        name = common.get_marcher_plot_name(Olim)
+    for ind, (nb, quad) in enumerate(itertools.product(Nbs, Quads)):
+        name = common.get_marcher_plot_name(nb, quad)
         axes[row, 0].loglog(
-            N, E2[slow, Olim], marker=marker, color=colors[ind//3],
+            N, E2[slow, nb, quad], marker=marker, color=colors[ind//3],
             linestyle=linestyles[ind % 3], linewidth=1, label=name)
         axes[row, 0].text(0.95, 0.9, '$\\texttt{s%d}$' % (row + 1),
                           transform=axes[row, 0].transAxes,
@@ -170,7 +176,7 @@ for row, slow in enumerate(Slows):
                           verticalalignment='center')
         axes[row, 0].minorticks_off()
         axes[row, 1].loglog(
-            N, EI[slow, Olim], marker=marker, color=colors[ind//3],
+            N, EI[slow, nb, quad], marker=marker, color=colors[ind//3],
             linestyle=linestyles[ind % 3], linewidth=1, label=name)
         axes[row, 1].text(0.95, 0.9, '$\\texttt{s%d}$' % (row + 1),
                           transform=axes[row, 1].transAxes,
